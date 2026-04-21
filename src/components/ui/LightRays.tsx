@@ -105,6 +105,7 @@ const LightRays: React.FC<LightRaysProps> = ({
   const animationIdRef = useRef<number | null>(null);
   const meshRef = useRef<Mesh | null>(null);
   const cleanupFunctionRef = useRef<(() => void) | null>(null);
+  const clickTimelineRef = useRef<gsap.core.Timeline | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const observerRef = useRef<IntersectionObserver | null>(null);
 
@@ -442,17 +443,35 @@ void main() {
       if (!uniformsRef.current || !containerRef.current) return;
       const u = uniformsRef.current;
 
+      // Kill any ongoing click animation and snap uniforms back to base values
+      // so the new burst always starts from a clean state
+      if (clickTimelineRef.current) {
+        clickTimelineRef.current.kill();
+        clickTimelineRef.current = null;
+      }
+
+      const originalColor = hexToRgb(raysColor);
+      const baseLightSpread = Math.max(lightSpread, 0.001);
+
+      // Snap back to original values immediately (avoids compounding glitch)
+      gsap.set(u.raysColor, { 'value[0]': originalColor[0], 'value[1]': originalColor[1], 'value[2]': originalColor[2] });
+      gsap.set(u.lightSpread, { value: baseLightSpread });
+      gsap.set(u.rayLength, { value: rayLength });
+      gsap.set(u.raysSpeed, { value: raysSpeed });
+      gsap.set(u.distortion, { value: distortion });
+      gsap.set(u.noiseAmount, { value: noiseAmount });
+
       // Move ray origin toward click point for directed burst
       const rect = containerRef.current.getBoundingClientRect();
       const clickX = (e.clientX - rect.left) / rect.width;
       const clickY = (e.clientY - rect.top) / rect.height;
       mouseRef.current = { x: clickX, y: clickY };
 
-      // Store original color
-      const originalColor = hexToRgb(raysColor);
-
       // Build cinematic timeline
-      const tl = gsap.timeline();
+      const tl = gsap.timeline({
+        onComplete: () => { clickTimelineRef.current = null; }
+      });
+      clickTimelineRef.current = tl;
 
       // Phase 1: Instant white-hot flash + massive spread (0 → 0.15s)
       tl.to(u.raysColor, {
@@ -464,7 +483,7 @@ void main() {
       }, 0);
 
       tl.to(u.lightSpread, {
-        value: Math.max(lightSpread, 0.001) * 12,
+        value: baseLightSpread * 12,
         duration: 0.12,
         ease: 'power4.out'
       }, 0);
@@ -513,7 +532,7 @@ void main() {
 
       // Phase 4: Everything relaxes to original (0.3s → 3s)
       tl.to(u.lightSpread, {
-        value: Math.max(lightSpread, 0.001),
+        value: baseLightSpread,
         duration: 2.5,
         ease: 'power4.out'
       }, 0.2);
